@@ -136,4 +136,127 @@ public class ScreenSharePlugin extends Plugin {
             getActivity().getWindowManager().getDefaultDisplay().getRealMetrics(dm);
             int w = dm.widthPixels, h = dm.heightPixels;
             double sc = Math.min(1.0, Math.min(1920.0 / Math.max(w, h), 1080.0 / Math.min(w, h)));
-            w = ((int) (w * sc)) &
+            w = ((int) (w * sc)) & ~1;
+            h = ((int) (h * sc)) & ~1;
+            capturer.startCapture(w, h, 60);
+
+            track = factory.createVideoTrack("screen", source);
+            PeerConnection.RTCConfiguration cfg = new PeerConnection.RTCConfiguration(ice);
+            cfg.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
+            pc = factory.createPeerConnection(cfg, new PeerConnection.Observer() {
+                @Override public void onSignalingChange(PeerConnection.SignalingState s) {}
+                @Override public void onIceConnectionChange(PeerConnection.IceConnectionState s) {}
+                @Override public void onIceConnectionReceivingChange(boolean b) {}
+                @Override public void onIceGatheringChange(PeerConnection.IceGatheringState s) {}
+                @Override public void onIceCandidate(IceCandidate c) {
+                    JSObject cand = new JSObject();
+                    cand.put("candidate", c.sdp);
+                    cand.put("sdpMid", c.sdpMid);
+                    cand.put("sdpMLineIndex", c.sdpMLineIndex);
+                    JSObject o = new JSObject();
+                    o.put("c", cand);
+                    emit("ice", o);
+                }
+                @Override public void onIceCandidatesRemoved(IceCandidate[] c) {}
+                @Override public void onAddStream(MediaStream s) {}
+                @Override public void onRemoveStream(MediaStream s) {}
+                @Override public void onDataChannel(DataChannel d) {}
+                @Override public void onRenegotiationNeeded() {}
+            });
+
+            RtpSender sender = pc.addTrack(track, Collections.singletonList("screen"));
+            try {
+                RtpParameters p = sender.getParameters();
+                for (RtpParameters.Encoding e : p.encodings) {
+                    e.maxBitrateBps = 10000000;
+                    e.maxFramerate = 60;
+                    e.scaleResolutionDownBy = 1.0;
+                }
+                p.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE;
+                sender.setParameters(p);
+            } catch (Throwable ignored) {}
+
+            pc.createOffer(new Sdp() {
+                @Override public void onCreateSuccess(final SessionDescription d) {
+                    pc.setLocalDescription(new Sdp() {
+                        @Override public void onSetSuccess() {
+                            JSObject o = new JSObject();
+                            o.put("sdp", d.description);
+                            emit("sdp", o);
+                        }
+                    }, d);
+                }
+                @Override public void onCreateFailure(String e) {
+                    JSObject o = new JSObject();
+                    o.put("m", e);
+                    emit("error", o);
+                }
+            }, new MediaConstraints());
+
+            JSObject r = new JSObject();
+            r.put("width", w);
+            r.put("height", h);
+            call.resolve(r);
+        } catch (Throwable t) {
+            stopInternal();
+            call.reject(String.valueOf(t.getMessage()));
+        }
+    }
+
+    @PluginMethod
+    public void setAnswer(PluginCall call) {
+        try {
+            if (pc != null) {
+                pc.setRemoteDescription(new Sdp() {
+                    @Override public void onSetSuccess() {
+                        remoteSet = true;
+                        for (IceCandidate c : pending) pc.addIceCandidate(c);
+                        pending.clear();
+                    }
+                }, new SessionDescription(SessionDescription.Type.ANSWER, call.getString("sdp")));
+            }
+            call.resolve();
+        } catch (Throwable t) {
+            call.reject(String.valueOf(t.getMessage()));
+        }
+    }
+
+    @PluginMethod
+    public void addIce(PluginCall call) {
+        try {
+            if (pc != null) {
+                Integer idx = call.getInt("sdpMLineIndex", 0);
+                IceCandidate c = new IceCandidate(call.getString("sdpMid"), idx == null ? 0 : idx, call.getString("candidate"));
+                if (remoteSet) pc.addIceCandidate(c);
+                else pending.add(c);
+            }
+            call.resolve();
+        } catch (Throwable t) {
+            call.resolve();
+        }
+    }
+
+    @PluginMethod
+    public void stop(PluginCall call) {
+        stopInternal();
+        call.resolve();
+    }
+
+    private synchronized void stopInternal() {
+        if (stopping) return;
+        stopping = true;
+        try { if (capturer != null) { capturer.stopCapture(); capturer.dispose(); } } catch (Throwable ignored) {}
+        try { if (pc != null) pc.close(); } catch (Throwable ignored) {}
+        try { if (track != null) track.dispose(); } catch (Throwable ignored) {}
+        try { if (source != null) source.dispose(); } catch (Throwable ignored) {}
+        try { if (helper != null) helper.dispose(); } catch (Throwable ignored) {}
+        try { if (pc != null) pc.dispose(); } catch (Throwable ignored) {}
+        try { if (factory != null) factory.dispose(); } catch (Throwable ignored) {}
+        try { if (egl != null) egl.release(); } catch (Throwable ignored) {}
+        capturer = null; pc = null; track = null; source = null; helper = null; factory = null; egl = null;
+        remoteSet = false;
+        pending.clear();
+        try { getContext().stopService(new Intent(getContext(), ScreenShareService.class)); } catch (Throwable ignored) {}
+        stopping = false;
+    }
+}
