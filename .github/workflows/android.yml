@@ -14,15 +14,15 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - run: npm install
       - run: npx cap add android
-      - name: Permissions, screen-share service and native WebRTC library
+      - name: Permissions, services and native WebRTC library
         run: |
           M=android/app/src/main/AndroidManifest.xml
-          sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA"/><uses-permission android:name="android.permission.RECORD_AUDIO"/><uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><application#' $M
-          sed -i 's#</application>#<service android:name=".ScreenShareService" android:exported="false" android:foregroundServiceType="mediaProjection|microphone"/></application>#' $M
+          sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA"/><uses-permission android:name="android.permission.RECORD_AUDIO"/><uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/><application#' $M
+          sed -i 's#</application>#<service android:name=".ScreenShareService" android:exported="false" android:foregroundServiceType="mediaProjection|microphone"/><service android:name=".KeepAliveService" android:exported="false" android:foregroundServiceType="dataSync"/></application>#' $M
           sed -i '0,/^dependencies {/s##dependencies {\n    implementation "io.getstream:stream-webrtc-android:1.1.1"#' android/app/build.gradle
           cp native/*.java android/app/src/main/java/com/banaagjade/circle/
           grep -n "stream-webrtc" android/app/build.gradle
-          grep -n "ScreenShareService" $M
+          grep -n "Service" $M
       - name: App icon (optional)
         run: npx --yes @capacitor/assets generate --android || true
       - run: npx cap sync android
