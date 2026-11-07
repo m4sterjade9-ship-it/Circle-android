@@ -1,0 +1,9 @@
+{
+  "appId": "com.banaagjade.circle",
+  "appName": "Circle",
+  "webDir": "www",
+  "server": {
+    "url": "https://mycircle.banaagjade9.workers.dev",
+    "androidScheme": "https"
+  }
+}
